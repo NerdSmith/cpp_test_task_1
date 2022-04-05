@@ -11,11 +11,9 @@ using namespace std;
 
 #pragma comment(lib, "Ws2_32.lib")
 
-
 #define DEFAULT_BUFLEN 512
 #define RESERVE_BLOCK_LENGTH 5
 #define MSG_LEN DEFAULT_BUFLEN - RESERVE_BLOCK_LENGTH
-
 
 int main(int argc, char* argv[])
 {
@@ -71,6 +69,7 @@ int main(int argc, char* argv[])
 
 	string fileFullPath;
 	int i;
+	char strBuf[DEFAULT_BUFLEN];
 	
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
 	if (iResult != 0) {
@@ -122,7 +121,7 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	while (TRUE) {
+	for (;;) {
 		ClientSocket = accept(ListenSocket, NULL, NULL);
 		if (ClientSocket == INVALID_SOCKET) {
 			printf("accept failed: %d\n", WSAGetLastError());
@@ -139,6 +138,7 @@ int main(int argc, char* argv[])
 				if (iSendResult == SOCKET_ERROR) {
 					printf("send failed: %d\n", WSAGetLastError());
 					closesocket(ClientSocket);
+					closesocket(ListenSocket);
 					WSACleanup();
 					return 1;
 				}
@@ -152,6 +152,7 @@ int main(int argc, char* argv[])
 			else {
 				printf("recv failed: %d\n", WSAGetLastError());
 				closesocket(ClientSocket);
+				closesocket(ListenSocket);
 				WSACleanup();
 				return 1;
 			}
@@ -170,6 +171,7 @@ int main(int argc, char* argv[])
 		if (iResult != 0) {
 			printf("getaddrinfo failed: %d\n", iResult);
 			closesocket(ClientSocket);
+			closesocket(ListenSocket);
 			WSACleanup();
 			return 1;
 		}
@@ -180,6 +182,7 @@ int main(int argc, char* argv[])
 		if (UDPClientSocket == INVALID_SOCKET) {
 			printf("Socket failed with error %d\n", WSAGetLastError());
 			closesocket(ClientSocket);
+			closesocket(ListenSocket);
 			WSACleanup();
 			return 1;
 		}
@@ -189,6 +192,7 @@ int main(int argc, char* argv[])
 		if (iResult != 0) {
 			printf("Bind failed with error %d\n", WSAGetLastError());
 			closesocket(ClientSocket);
+			closesocket(ListenSocket);
 			WSACleanup();
 			return 1;
 		}
@@ -209,6 +213,7 @@ int main(int argc, char* argv[])
 					recvbuf, DEFAULT_BUFLEN, 0, (SOCKADDR*)&SenderAddr, &SenderAddrSize);
 				if (iResult == SOCKET_ERROR) {
 					printf("Recvfrom failed with error %d\n", WSAGetLastError());
+					continue;
 				}
 				memcpy(blockNbBuf, recvbuf, RESERVE_BLOCK_LENGTH);
 				blockNb = atoi(blockNbBuf);
@@ -239,6 +244,8 @@ int main(int argc, char* argv[])
 				else {
 					printf("recv failed: %d\n", WSAGetLastError());
 					closesocket(ClientSocket);
+					closesocket(ListenSocket);
+					closesocket(UDPClientSocket);
 					WSACleanup();
 					return 1;
 				}
@@ -256,17 +263,21 @@ int main(int argc, char* argv[])
 		if (!myfile) {
 			printf("Unable to open file");
 			closesocket(ClientSocket);
+			closesocket(ListenSocket);
 			WSACleanup();
 			return 1;
 		}
 
 		for (i = 0; i < dataBlocks.size(); i++) {
 			printf("writing block: %d\n", i + 1);
-			myfile.write((const char*)&(dataBlocks[i])[0], (dataBlocks[i]).size());
+			memset(&strBuf[0], 0, sizeof(strBuf));
+			copy(dataBlocks[i].begin(), dataBlocks[i].end(), strBuf);
+
+			myfile.write(&strBuf[0], strlen(strBuf));
 		}
 
 		myfile.close();
-		printf("Transmission done, file path: %s\n", fileFullPath.c_str());
+		printf("Transfer completed, file path: %s\n", fileFullPath.c_str());
 		memset(&recvbuf[0], 0, sizeof(recvbuf));
 		dataBlocks.clear();
 	}

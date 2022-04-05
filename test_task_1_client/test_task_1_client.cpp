@@ -143,13 +143,15 @@ int main(int argc, char* argv[])
 	iResult = getaddrinfo(ipAddr, udpPort, &UDPHints, &result);
 	if (iResult != 0) {
 		printf("getaddrinfo failed: %d\n", iResult);
+		closesocket(ConnectSocket);
 		WSACleanup();
 		return 1;
 	}
 
 	UDPSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 	if (UDPSocket == INVALID_SOCKET) {
-		wprintf(L"socket failed with error %d\n", WSAGetLastError());
+		printf("Socket failed with error %d\n", WSAGetLastError());
+		closesocket(ConnectSocket);
 		return 1;
 	}
 
@@ -160,6 +162,7 @@ int main(int argc, char* argv[])
 	std::ifstream myfile (filename);
 	if (!myfile) {
 		printf("Unable to open file");
+		closesocket(ConnectSocket);
 		closesocket(UDPSocket);
 		WSACleanup();
 		return 1;
@@ -175,7 +178,7 @@ int main(int argc, char* argv[])
 
 		myfile.read(&fileData[RESERVE_BLOCK_LENGTH], MSG_LEN - 1);
 
-		while (TRUE) {
+		for (;;) {
 			FD_ZERO(&rset);
 			FD_SET(ConnectSocket, &rset);
 
@@ -183,6 +186,7 @@ int main(int argc, char* argv[])
 				0, result->ai_addr, result->ai_addrlen);
 			if (iResult == SOCKET_ERROR) {
 				printf("send failed: %d\n", WSAGetLastError());
+				closesocket(ConnectSocket);
 				closesocket(UDPSocket);
 				WSACleanup();
 				return 1;
@@ -193,6 +197,7 @@ int main(int argc, char* argv[])
 			selectRes = select(0, &rset, NULL, NULL, &timeout);
 			if (selectRes == SOCKET_ERROR) {
 				printf("select error: %d\n", WSAGetLastError());
+				closesocket(ConnectSocket);
 				closesocket(UDPSocket);
 				WSACleanup();
 			}
@@ -201,7 +206,6 @@ int main(int argc, char* argv[])
 				continue;
 			}
 			else {
-				printf("recv %d\n", selectRes);
 				receiveResult = recv(ConnectSocket, recvbuf, recvbuflen, 0);
 
 				if (receiveResult > 0) {
@@ -210,12 +214,12 @@ int main(int argc, char* argv[])
 
 					printf("curr pnb %d | got %d\n", blockNb, recvBlockNb);
 
-					if (pNumbers.find(recvBlockNb) == pNumbers.end()) {
-						continue;
-					}
-					else {
+					if (pNumbers.find(recvBlockNb) != pNumbers.end()) {
 						pNumbers.erase(recvBlockNb);
 						printf("Bytes received: %d\n", receiveResult);
+					}
+					else {
+						continue;
 					}
 				}
 				else if (receiveResult == 0)
@@ -229,6 +233,7 @@ int main(int argc, char* argv[])
 			sendResult = send(ConnectSocket, NULL, 0, 0);
 			if (sendResult == SOCKET_ERROR) {
 				printf("send failed: %d\n", WSAGetLastError());
+				closesocket(UDPSocket);
 				closesocket(ConnectSocket);
 				WSACleanup();
 				return 1;
@@ -246,16 +251,17 @@ int main(int argc, char* argv[])
 
 	myfile.close();
 
-	// end of transmission
+	// end of transfer
 
 	iResult = shutdown(ConnectSocket, SD_SEND);
 	if (iResult == SOCKET_ERROR) {
 		printf("shutdown failed: %d\n", WSAGetLastError());
+		closesocket(UDPSocket);
 		closesocket(ConnectSocket);
 		WSACleanup();
 		return 1;
 	}
-
+	closesocket(UDPSocket);
 	closesocket(ConnectSocket);
 	WSACleanup();
 
