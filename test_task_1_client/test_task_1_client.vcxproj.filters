@@ -19,9 +19,4 @@
       <Filter>Исходные файлы</Filter>
     </ClCompile>
   </ItemGroup>
-  <ItemGroup>
-    <Text Include="..\Debug\test.txt">
-      <Filter>Исходные файлы</Filter>
-    </Text>
-  </ItemGroup>
 </Project>

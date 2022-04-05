@@ -253,6 +253,13 @@ int main(int argc, char* argv[])
 
 		ofstream myfile(fileFullPath);
 
+		if (!myfile) {
+			printf("Unable to open file");
+			closesocket(ClientSocket);
+			WSACleanup();
+			return 1;
+		}
+
 		for (i = 0; i < dataBlocks.size(); i++) {
 			printf("writing block: %d\n", i + 1);
 			myfile.write((const char*)&(dataBlocks[i])[0], (dataBlocks[i]).size());
