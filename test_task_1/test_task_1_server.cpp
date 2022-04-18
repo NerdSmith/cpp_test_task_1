@@ -7,6 +7,7 @@
 #include <vector>
 #include <fstream>
 #include <fileapi.h>
+#include <windows.h>
 using namespace std;
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -15,14 +16,28 @@ using namespace std;
 #define RESERVE_BLOCK_LENGTH 5
 #define MSG_LEN DEFAULT_BUFLEN - RESERVE_BLOCK_LENGTH
 
-int main(int argc, char* argv[])
-{
-	locale::global(locale());
-	if (argc < 4) {
-		printf("Not enough command line arguments, got: %d, need: 3", argc - 1);
-		return 1;
-	}
+static DWORD threadId;
+static HANDLE hServTread;
 
+struct ServInfo {
+	char* ipAddr;
+	char* port;
+	char* dirname;
+};
+
+BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
+{
+	printf("Server stop\n");
+	if (fdwCtrlType == CTRL_C_EVENT) {
+		TerminateThread(hServTread, 0);
+		return TRUE;
+	}
+	return FALSE;
+}
+
+
+DWORD WINAPI servFunc(LPVOID lpParam)
+{
 	WSADATA wsaData;
 
 	char recvbuf[DEFAULT_BUFLEN];
@@ -37,10 +52,12 @@ int main(int argc, char* argv[])
 	struct addrinfo TCPHints;
 	struct addrinfo UDPHints;
 
-	char* ipAddr = argv[1];
-	char* port = argv[2];
+	ServInfo* servInfo = static_cast<struct ServInfo*>(lpParam);
 
-	string dirName = argv[3];
+	char* ipAddr = servInfo->ipAddr;
+	char* port = servInfo->port;
+
+	string dirName = servInfo->dirname;
 	if (CreateDirectoryA(dirName.c_str(), NULL) ||
 		ERROR_ALREADY_EXISTS == GetLastError())
 	{
@@ -70,7 +87,7 @@ int main(int argc, char* argv[])
 	string fileFullPath;
 	int i;
 	char strBuf[DEFAULT_BUFLEN];
-	
+
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
 	if (iResult != 0) {
 		printf("WSAStartup failed: %d\n", iResult);
@@ -281,11 +298,47 @@ int main(int argc, char* argv[])
 		memset(&recvbuf[0], 0, sizeof(recvbuf));
 		dataBlocks.clear();
 	}
-	
+
 	closesocket(ListenSocket);
 
 	closesocket(ClientSocket);
 	WSACleanup();
 
 	return 0;
+}
+
+
+
+int main(int argc, char* argv[])
+{
+	locale::global(locale());
+	if (argc < 4) {
+		printf("Not enough command line arguments, got: %d, need: 3", argc - 1);
+		return 1;
+	}
+
+	struct ServInfo* servInfo = new ServInfo();
+	servInfo->ipAddr = argv[1];
+	servInfo->port = argv[2];
+	servInfo->dirname = argv[3];
+
+	hServTread = CreateThread(
+		NULL,
+		0,
+		servFunc,
+		servInfo,
+		0,
+		&threadId
+	);
+
+	if (hServTread == NULL) {
+		printf("Can't create server thread\n");
+		return 1;
+	}
+
+	SetConsoleCtrlHandler(CtrlHandler, TRUE);
+	
+	WaitForSingleObject(hServTread, INFINITE);
+	return 0;
+
 }
