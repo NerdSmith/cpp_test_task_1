@@ -18,6 +18,7 @@ using namespace std;
 
 static DWORD threadId;
 static HANDLE hServTread;
+static struct ServInfo* servInfo;
 
 struct ServInfo {
 	char* ipAddr;
@@ -59,12 +60,10 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 	string dirName = servInfo->dirname;
 	if (CreateDirectoryA(dirName.c_str(), NULL) ||
-		ERROR_ALREADY_EXISTS == GetLastError())
-	{
+		ERROR_ALREADY_EXISTS == GetLastError()) {
 		printf("Dir is OK\n");
 	}
-	else
-	{
+	else {
 		printf("Can't create dir\n");
 		return 1;
 	}
@@ -317,7 +316,7 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	struct ServInfo* servInfo = new ServInfo();
+	servInfo = new ServInfo();
 	servInfo->ipAddr = argv[1];
 	servInfo->port = argv[2];
 	servInfo->dirname = argv[3];
@@ -340,5 +339,4 @@ int main(int argc, char* argv[])
 	
 	WaitForSingleObject(hServTread, INFINITE);
 	return 0;
-
 }
