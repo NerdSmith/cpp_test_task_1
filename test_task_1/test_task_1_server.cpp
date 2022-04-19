@@ -44,9 +44,35 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 	return FALSE;
 }
 
+string toStr(char* cStr) {
+	string s(cStr);
+	return s;
+}
+
+int createDirIfNotExist(string dirName) {
+	
+	if (CreateDirectoryA(dirName.c_str(), NULL) ||
+		ERROR_ALREADY_EXISTS == GetLastError()) {
+		printf("Dir is OK\n");
+		return 0;
+	}
+	
+	printf("Can't create dir\n");
+	return 1;
+}
+
+void setupHints(addrinfo& hints, int ai_family, int ai_socktype, int ai_protocol) {
+	ZeroMemory(&hints, sizeof(hints));
+	hints.ai_family = ai_family;
+	hints.ai_socktype = ai_socktype;
+	hints.ai_protocol = ai_protocol;
+}
+
 
 DWORD WINAPI servFunc(LPVOID lpParam)
 {
+	map<SOCKET, Client*> clients;
+
 	WSADATA wsaData;
 
 	char recvbuf[DEFAULT_BUFLEN];
@@ -57,7 +83,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	SOCKET ClientSocket = INVALID_SOCKET;
 	SOCKET UDPClientSocket = INVALID_SOCKET;
 
-	struct addrinfo* result = NULL;
+	struct addrinfo* servAddr = NULL;
 	struct addrinfo TCPHints;
 	struct addrinfo UDPHints;
 
@@ -68,14 +94,10 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 	string dirName = servInfo->dirname;
 
-	if (CreateDirectoryA(dirName.c_str(), NULL) ||
-		ERROR_ALREADY_EXISTS == GetLastError()) {
-		printf("Dir is OK\n");
-	}
-	else {
-		printf("Can't create dir\n");
+
+	if (createDirIfNotExist(toStr(servInfo->dirname))) {
 		return 1;
-	}
+	};
 
 	char udpPort[RESERVE_BLOCK_LENGTH];
 	char filenameBuf[MSG_LEN];
@@ -102,41 +124,34 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		return 1;
 	}
 
-	ZeroMemory(&TCPHints, sizeof(TCPHints));
-	TCPHints.ai_family = AF_INET;
-	TCPHints.ai_socktype = SOCK_STREAM;
-	TCPHints.ai_protocol = IPPROTO_TCP;
+	setupHints(TCPHints, AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	setupHints(UDPHints, AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
-	ZeroMemory(&UDPHints, sizeof(UDPHints));
-	UDPHints.ai_family = AF_INET;
-	UDPHints.ai_socktype = SOCK_DGRAM;
-	UDPHints.ai_protocol = IPPROTO_UDP;
-
-	iResult = getaddrinfo(ipAddr, port, &TCPHints, &result);
+	iResult = getaddrinfo(servInfo->ipAddr, servInfo->port, &TCPHints, &servAddr);
 	if (iResult != 0) {
 		printf("getaddrinfo failed: %d\n", iResult);
 		WSACleanup();
 		return 1;
 	}
 
-	ListenSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+	ListenSocket = socket(servAddr->ai_family, servAddr->ai_socktype, servAddr->ai_protocol);
 	if (ListenSocket == INVALID_SOCKET) {
 		printf("Error at socket(): %ld\n", WSAGetLastError());
-		freeaddrinfo(result);
+		freeaddrinfo(servAddr);
 		WSACleanup();
 		return 1;
 	}
 
-	iResult = bind(ListenSocket, result->ai_addr, (int)result->ai_addrlen);
+	iResult = bind(ListenSocket, servAddr->ai_addr, (int)servAddr->ai_addrlen);
 	if (iResult == SOCKET_ERROR) {
 		printf("bind failed with error: %d\n", WSAGetLastError());
-		freeaddrinfo(result);
+		freeaddrinfo(servAddr);
 		closesocket(ListenSocket);
 		WSACleanup();
 		return 1;
 	}
 
-	freeaddrinfo(result);
+	freeaddrinfo(servAddr);
 
 	iResult = listen(ListenSocket, SOMAXCONN);
 	if (iResult == SOCKET_ERROR) {
@@ -192,7 +207,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		printf("Filename: %s\n", filename.c_str());
 		memset(recvbuf, 0, sizeof(recvbuf));
 
-		iResult = getaddrinfo(ipAddr, udpPort, &UDPHints, &result);
+		iResult = getaddrinfo(ipAddr, udpPort, &UDPHints, &servAddr);
 		if (iResult != 0) {
 			printf("getaddrinfo failed: %d\n", iResult);
 			closesocket(ClientSocket);
@@ -203,7 +218,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 		// UDP
 
-		UDPClientSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+		UDPClientSocket = socket(servAddr->ai_family, servAddr->ai_socktype, servAddr->ai_protocol);
 		if (UDPClientSocket == INVALID_SOCKET) {
 			printf("Socket failed with error %d\n", WSAGetLastError());
 			closesocket(ClientSocket);
@@ -213,7 +228,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		}
 
 
-		iResult = bind(UDPClientSocket, result->ai_addr, (int)result->ai_addrlen);
+		iResult = bind(UDPClientSocket, servAddr->ai_addr, (int)servAddr->ai_addrlen);
 		if (iResult != 0) {
 			printf("Bind failed with error %d\n", WSAGetLastError());
 			closesocket(ClientSocket);
