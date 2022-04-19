@@ -390,10 +390,7 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	servInfo = new ServInfo();
-	servInfo->ipAddr = argv[1];
-	servInfo->port = argv[2];
-	servInfo->dirname = argv[3];
+	servInfo = new ServInfo{ argv[1], argv[2], argv[3] };
 
 	hServTread = CreateThread(
 		NULL,
