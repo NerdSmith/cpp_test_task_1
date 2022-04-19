@@ -26,6 +26,14 @@ struct ServInfo {
 	char* dirname;
 };
 
+struct Client {
+	SOCKET TCPSock = INVALID_SOCKET;
+	SOCKET UDPSock = INVALID_SOCKET;
+	string filename;
+	string UDPPort;
+	map<int, vector<char>> dataBlocks;
+};
+
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 {
 	printf("Server stop\n");
@@ -59,6 +67,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	char* port = servInfo->port;
 
 	string dirName = servInfo->dirname;
+
 	if (CreateDirectoryA(dirName.c_str(), NULL) ||
 		ERROR_ALREADY_EXISTS == GetLastError()) {
 		printf("Dir is OK\n");
