@@ -220,8 +220,15 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					ZeroMemory(&recvbuf, sizeof(recvbuf));
 				}
 				else if (iResult == 0) {
+					TCPSockets.remove(clients[sock].TCPSock);
+					UDPSockets.remove(clients[sock].UDPSock);
+
+					clients.erase(clients[sock].TCPSock);
+					clients.erase(clients[sock].UDPSock);
+
 					closesocket(clients[sock].TCPSock);
 					closesocket(clients[sock].UDPSock);
+
 					printf("Connection closing...\n");
 				}
 				else {
