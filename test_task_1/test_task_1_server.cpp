@@ -70,10 +70,45 @@ void setupHints(addrinfo& hints, int ai_family, int ai_socktype, int ai_protocol
 	hints.ai_protocol = ai_protocol;
 }
 
+SOCKET createAndBindSocket(char* ipAddr, char* port, addrinfo& hints) {
+	int iRes;
+	SOCKET sock;
+	addrinfo* addr = NULL;
+
+	iRes = getaddrinfo(ipAddr, port, &hints, &addr);
+	if (iRes != 0) {
+		printf("getaddrinfo failed: %d\n", iRes);
+		WSACleanup();
+		return INVALID_SOCKET;
+	}
+
+	sock = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol);
+	if (sock == INVALID_SOCKET) {
+		printf("Error at socket(): %ld\n", WSAGetLastError());
+		freeaddrinfo(addr);
+		WSACleanup();
+		return INVALID_SOCKET;
+	}
+
+	iRes = bind(sock, addr->ai_addr, (int)addr->ai_addrlen);
+	if (iRes == SOCKET_ERROR) {
+		printf("bind failed with error: %d\n", WSAGetLastError());
+		freeaddrinfo(addr);
+		closesocket(sock);
+		WSACleanup();
+		return INVALID_SOCKET;
+	}
+
+	freeaddrinfo(addr);
+
+	return sock;
+}
+
 
 DWORD WINAPI servFunc(LPVOID lpParam)
 {
 	map<SOCKET, Client> clients;
+	map<SOCKET, SOCKET> UDP_TCP_map;
 
 	WSADATA wsaData;
 
@@ -129,29 +164,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	setupHints(TCPHints, AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	setupHints(UDPHints, AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
-	iResult = getaddrinfo(servInfo->ipAddr, servInfo->port, &TCPHints, &servAddr);
-	if (iResult != 0) {
-		printf("getaddrinfo failed: %d\n", iResult);
-		WSACleanup();
-		return 1;
-	}
-
-	ListenSocket = socket(servAddr->ai_family, servAddr->ai_socktype, servAddr->ai_protocol);
-	if (ListenSocket == INVALID_SOCKET) {
-		printf("Error at socket(): %ld\n", WSAGetLastError());
-		freeaddrinfo(servAddr);
-		WSACleanup();
-		return 1;
-	}
-
-	iResult = bind(ListenSocket, servAddr->ai_addr, (int)servAddr->ai_addrlen);
-	if (iResult == SOCKET_ERROR) {
-		printf("bind failed with error: %d\n", WSAGetLastError());
-		freeaddrinfo(servAddr);
-		closesocket(ListenSocket);
-		WSACleanup();
-		return 1;
-	}
+	createAndBindSocket(servInfo->ipAddr, servInfo->port, TCPHints);
 
 	freeaddrinfo(servAddr);
 
