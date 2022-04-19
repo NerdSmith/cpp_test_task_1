@@ -8,6 +8,7 @@
 #include <fstream>
 #include <fileapi.h>
 #include <windows.h>
+#include <list>
 using namespace std;
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -19,6 +20,7 @@ using namespace std;
 static DWORD threadId;
 static HANDLE hServTread;
 static struct ServInfo* servInfo;
+
 
 struct ServInfo {
 	char* ipAddr;
@@ -71,7 +73,7 @@ void setupHints(addrinfo& hints, int ai_family, int ai_socktype, int ai_protocol
 
 DWORD WINAPI servFunc(LPVOID lpParam)
 {
-	map<SOCKET, Client*> clients;
+	map<SOCKET, Client> clients;
 
 	WSADATA wsaData;
 
@@ -80,7 +82,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	int recvbuflen = DEFAULT_BUFLEN;
 
 	SOCKET ListenSocket = INVALID_SOCKET;
-	SOCKET ClientSocket = INVALID_SOCKET;
+	SOCKET TCPClientSocket = INVALID_SOCKET;
 	SOCKET UDPClientSocket = INVALID_SOCKET;
 
 	struct addrinfo* servAddr = NULL;
@@ -153,6 +155,12 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 	freeaddrinfo(servAddr);
 
+	fd_set sockets_fds;
+	FD_ZERO(&sockets_fds);
+	list<SOCKET> TCPSockets;
+	list<SOCKET> UDPSockets;
+	
+
 	iResult = listen(ListenSocket, SOMAXCONN);
 	if (iResult == SOCKET_ERROR) {
 		printf("listen failed with error: %d\n", WSAGetLastError());
@@ -162,8 +170,83 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	}
 
 	for (;;) {
-		ClientSocket = accept(ListenSocket, NULL, NULL);
-		if (ClientSocket == INVALID_SOCKET) {
+		
+		FD_SET(ListenSocket, &sockets_fds);
+		/// add sockets to fd_set
+		
+		select(0, &sockets_fds, NULL, NULL, NULL);
+
+		if (FD_ISSET(ListenSocket, &sockets_fds)) {
+			TCPClientSocket = accept(ListenSocket, NULL, NULL);
+			if (TCPClientSocket == INVALID_SOCKET) {
+				printf("accept failed: %d\n", WSAGetLastError());
+				closesocket(ListenSocket);
+				WSACleanup();
+				return 1;
+			}
+			struct Client client;
+			client.TCPSock = TCPClientSocket;
+
+			TCPSockets.push_back(TCPClientSocket);
+			clients.emplace(TCPClientSocket, client);
+		}
+
+		for (const SOCKET& sock : TCPSockets) {
+			// if not 0 recv -> fill struct, create new sock
+			// otherwise -> close conn, del from sockets & clients
+			if (FD_ISSET(sock, &sockets_fds)) {
+				iResult = recv(sock, recvbuf, recvbuflen, 0);
+				if (iResult > 0) {
+					printf("Bytes received: %d\n", iResult);
+					iSendResult = send(sock, recvbuf, iResult, 0);
+					if (iSendResult == SOCKET_ERROR) {
+						printf("send failed: %d\n", WSAGetLastError());
+						closesocket(sock);
+						closesocket(ListenSocket);
+						WSACleanup();
+						return 1;
+					}
+					printf("Bytes sent: %d\n", iSendResult);
+
+					memcpy(udpPort, recvbuf, RESERVE_BLOCK_LENGTH);
+					memcpy(filenameBuf, recvbuf + RESERVE_BLOCK_LENGTH, MSG_LEN);
+
+					clients[sock].UDPPort = udpPort;
+					clients[sock].filename = filenameBuf;
+
+					printf("UDP port: %s\n", clients[sock].UDPPort);
+					printf("Filename: %s\n", clients[sock].filename);
+
+					ZeroMemory(&recvbuf, sizeof(recvbuf));
+				}
+				else if (iResult == 0) {
+					closesocket(clients[sock].TCPSock);
+					closesocket(clients[sock].UDPSock);
+					printf("Connection closing...\n");
+				}
+				else {
+					printf("recv failed: %d\n", WSAGetLastError());
+					closesocket(TCPClientSocket);
+					closesocket(ListenSocket);
+					WSACleanup();
+					return 1;
+				}
+			}
+		}
+
+		for (const SOCKET& sock : UDPSockets) {
+			// get client & fill map with dataBlocks
+		}
+
+	}
+
+
+
+
+
+	for (;;) {
+		TCPClientSocket = accept(ListenSocket, NULL, NULL);
+		if (TCPClientSocket == INVALID_SOCKET) {
 			printf("accept failed: %d\n", WSAGetLastError());
 			closesocket(ListenSocket);
 			WSACleanup();
@@ -171,13 +254,13 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		}
 
 		do {
-			iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
+			iResult = recv(TCPClientSocket, recvbuf, recvbuflen, 0);
 			if (iResult > 0) {
 				printf("Bytes received: %d\n", iResult);
-				iSendResult = send(ClientSocket, recvbuf, iResult, 0);
+				iSendResult = send(TCPClientSocket, recvbuf, iResult, 0);
 				if (iSendResult == SOCKET_ERROR) {
 					printf("send failed: %d\n", WSAGetLastError());
-					closesocket(ClientSocket);
+					closesocket(TCPClientSocket);
 					closesocket(ListenSocket);
 					WSACleanup();
 					return 1;
@@ -191,7 +274,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 				printf("Connection closing...\n");
 			else {
 				printf("recv failed: %d\n", WSAGetLastError());
-				closesocket(ClientSocket);
+				closesocket(TCPClientSocket);
 				closesocket(ListenSocket);
 				WSACleanup();
 				return 1;
@@ -210,7 +293,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		iResult = getaddrinfo(ipAddr, udpPort, &UDPHints, &servAddr);
 		if (iResult != 0) {
 			printf("getaddrinfo failed: %d\n", iResult);
-			closesocket(ClientSocket);
+			closesocket(TCPClientSocket);
 			closesocket(ListenSocket);
 			WSACleanup();
 			return 1;
@@ -221,7 +304,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		UDPClientSocket = socket(servAddr->ai_family, servAddr->ai_socktype, servAddr->ai_protocol);
 		if (UDPClientSocket == INVALID_SOCKET) {
 			printf("Socket failed with error %d\n", WSAGetLastError());
-			closesocket(ClientSocket);
+			closesocket(TCPClientSocket);
 			closesocket(ListenSocket);
 			WSACleanup();
 			return 1;
@@ -231,7 +314,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		iResult = bind(UDPClientSocket, servAddr->ai_addr, (int)servAddr->ai_addrlen);
 		if (iResult != 0) {
 			printf("Bind failed with error %d\n", WSAGetLastError());
-			closesocket(ClientSocket);
+			closesocket(TCPClientSocket);
 			closesocket(ListenSocket);
 			WSACleanup();
 			return 1;
@@ -243,7 +326,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		printf("Receiving datagrams...\n");
 
 		for (;;) {
-			FD_SET(ClientSocket, &rset);
+			FD_SET(TCPClientSocket, &rset);
 			FD_SET(UDPClientSocket, &rset);
 
 			iResult = select(0, &rset, NULL, NULL, NULL);
@@ -261,9 +344,9 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 				printf("Got block %d\n", blockNb);
 
 				vector<char> buffer(fileDataBuf, fileDataBuf + sizeof(fileDataBuf));
-				dataBlocks.emplace(blockNb, move(buffer));
+				dataBlocks.emplace(blockNb, buffer);
 
-				iSendResult = send(ClientSocket, recvbuf, iResult, 0);
+				iSendResult = send(TCPClientSocket, recvbuf, iResult, 0);
 				if (iSendResult == SOCKET_ERROR) {
 					printf("send failed: %d\n", WSAGetLastError());
 					continue;
@@ -274,8 +357,8 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 				}
 			}
 
-			if (FD_ISSET(ClientSocket, &rset)) {
-				iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
+			if (FD_ISSET(TCPClientSocket, &rset)) {
+				iResult = recv(TCPClientSocket, recvbuf, recvbuflen, 0);
 				if (iResult > 0) {
 					printf("Bytes received: %d\n", iResult);
 				}
@@ -283,7 +366,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					printf("Connection closing...\n");
 				else {
 					printf("recv failed: %d\n", WSAGetLastError());
-					closesocket(ClientSocket);
+					closesocket(TCPClientSocket);
 					closesocket(ListenSocket);
 					closesocket(UDPClientSocket);
 					WSACleanup();
@@ -302,7 +385,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 		if (!myfile) {
 			printf("Unable to open file");
-			closesocket(ClientSocket);
+			closesocket(TCPClientSocket);
 			closesocket(ListenSocket);
 			WSACleanup();
 			return 1;
@@ -324,7 +407,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 	closesocket(ListenSocket);
 
-	closesocket(ClientSocket);
+	closesocket(TCPClientSocket);
 	WSACleanup();
 
 	return 0;
