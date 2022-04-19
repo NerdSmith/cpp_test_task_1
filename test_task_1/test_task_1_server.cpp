@@ -34,7 +34,24 @@ struct Client {
 	string filename;
 	string UDPPort;
 	map<int, vector<char>> dataBlocks;
+	
+	public:
+		void print();
 };
+
+void Client::print() {
+	printf(
+		"TCPSock: %d\n"
+		"UDPSock: %d\n"
+		"filename: %s\n"
+		"UDPPort: %s\n"
+	, 
+		this->TCPSock, 
+		this->UDPSock, 
+		this->filename, 
+		this->UDPPort
+	);
+}
 
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType)
 {
@@ -164,7 +181,11 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	setupHints(TCPHints, AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	setupHints(UDPHints, AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
-	createAndBindSocket(servInfo->ipAddr, servInfo->port, TCPHints);
+	ListenSocket = createAndBindSocket(servInfo->ipAddr, servInfo->port, TCPHints);
+	if (ListenSocket == INVALID_SOCKET) {
+		WSACleanup();
+		return 1;
+	}
 
 	freeaddrinfo(servAddr);
 
@@ -172,7 +193,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	FD_ZERO(&sockets_fds);
 	list<SOCKET> TCPSockets;
 	list<SOCKET> UDPSockets;
-	
+	struct Client client;
 
 	iResult = listen(ListenSocket, SOMAXCONN);
 	if (iResult == SOCKET_ERROR) {
@@ -197,7 +218,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 				WSACleanup();
 				return 1;
 			}
-			struct Client client;
+
 			client.TCPSock = TCPClientSocket;
 
 			TCPSockets.push_back(TCPClientSocket);
@@ -227,17 +248,30 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					clients[sock].UDPPort = udpPort;
 					clients[sock].filename = filenameBuf;
 
-					printf("UDP port: %s\n", clients[sock].UDPPort);
-					printf("Filename: %s\n", clients[sock].filename);
+					clients[sock].print();
 
 					ZeroMemory(&recvbuf, sizeof(recvbuf));
+
+					UDPClientSocket = createAndBindSocket(
+						servInfo->ipAddr, 
+						const_cast<char*>(clients[sock].UDPPort.c_str()), 
+						UDPHints
+					);
+
+					if (UDPClientSocket == INVALID_SOCKET) {
+						continue;
+					}
+
+					UDPSockets.push_back(UDPClientSocket);
+					UDP_TCP_map.emplace(UDPClientSocket, TCPClientSocket);
+
+					clients[sock].UDPSock = UDPClientSocket;
 				}
 				else if (iResult == 0) {
 					TCPSockets.remove(clients[sock].TCPSock);
 					UDPSockets.remove(clients[sock].UDPSock);
 
 					clients.erase(clients[sock].TCPSock);
-					clients.erase(clients[sock].UDPSock);
 
 					closesocket(clients[sock].TCPSock);
 					closesocket(clients[sock].UDPSock);
@@ -310,35 +344,43 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		printf("Filename: %s\n", filename.c_str());
 		memset(recvbuf, 0, sizeof(recvbuf));
 
-		iResult = getaddrinfo(ipAddr, udpPort, &UDPHints, &servAddr);
-		if (iResult != 0) {
-			printf("getaddrinfo failed: %d\n", iResult);
-			closesocket(TCPClientSocket);
-			closesocket(ListenSocket);
-			WSACleanup();
-			return 1;
-		}
 
-		// UDP
-
-		UDPClientSocket = socket(servAddr->ai_family, servAddr->ai_socktype, servAddr->ai_protocol);
+		UDPClientSocket = createAndBindSocket(ipAddr, udpPort, UDPHints);
 		if (UDPClientSocket == INVALID_SOCKET) {
-			printf("Socket failed with error %d\n", WSAGetLastError());
-			closesocket(TCPClientSocket);
 			closesocket(ListenSocket);
 			WSACleanup();
 			return 1;
 		}
 
+		//iResult = getaddrinfo(ipAddr, udpPort, &UDPHints, &servAddr);
+		//if (iResult != 0) {
+		//	printf("getaddrinfo failed: %d\n", iResult);
+		//	closesocket(TCPClientSocket);
+		//	closesocket(ListenSocket);
+		//	WSACleanup();
+		//	return 1;
+		//}
 
-		iResult = bind(UDPClientSocket, servAddr->ai_addr, (int)servAddr->ai_addrlen);
-		if (iResult != 0) {
-			printf("Bind failed with error %d\n", WSAGetLastError());
-			closesocket(TCPClientSocket);
-			closesocket(ListenSocket);
-			WSACleanup();
-			return 1;
-		}
+		//// UDP
+
+		//UDPClientSocket = socket(servAddr->ai_family, servAddr->ai_socktype, servAddr->ai_protocol);
+		//if (UDPClientSocket == INVALID_SOCKET) {
+		//	printf("Socket failed with error %d\n", WSAGetLastError());
+		//	closesocket(TCPClientSocket);
+		//	closesocket(ListenSocket);
+		//	WSACleanup();
+		//	return 1;
+		//}
+
+
+		//iResult = bind(UDPClientSocket, servAddr->ai_addr, (int)servAddr->ai_addrlen);
+		//if (iResult != 0) {
+		//	printf("Bind failed with error %d\n", WSAGetLastError());
+		//	closesocket(TCPClientSocket);
+		//	closesocket(ListenSocket);
+		//	WSACleanup();
+		//	return 1;
+		//}
 
 		memset(blockNbBuf, 0, sizeof(blockNbBuf));
 		memset(fileDataBuf, 0, sizeof(fileDataBuf));
