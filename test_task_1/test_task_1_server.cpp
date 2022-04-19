@@ -170,17 +170,11 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 	ServInfo* servInfo = static_cast<struct ServInfo*>(lpParam);
 
-	char* ipAddr = servInfo->ipAddr;
-	char* port = servInfo->port;
-
-	string dirName = servInfo->dirname;
-
-
 	if (createDirIfNotExist(toStr(servInfo->dirname))) {
 		return 1;
 	};
 
-	char udpPort[RESERVE_BLOCK_LENGTH];
+	char udpPortBuf[RESERVE_BLOCK_LENGTH];
 	char filenameBuf[MSG_LEN];
 	string filename;
 
@@ -244,6 +238,8 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		ZeroMemory(&recvbuf, sizeof(recvbuf));
 		ZeroMemory(&blockNbBuf, sizeof(blockNbBuf));
 		ZeroMemory(&fileDataBuf, sizeof(fileDataBuf));
+		ZeroMemory(&udpPortBuf, sizeof(udpPortBuf));
+		ZeroMemory(&filenameBuf, sizeof(filenameBuf));
 
 		select(0, &sockets_fds, NULL, NULL, NULL);
 
@@ -279,10 +275,10 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					}
 					printf("Bytes sent: %d\n", iSendResult);
 
-					memcpy(udpPort, recvbuf, RESERVE_BLOCK_LENGTH);
+					memcpy(udpPortBuf, recvbuf, RESERVE_BLOCK_LENGTH);
 					memcpy(filenameBuf, recvbuf + RESERVE_BLOCK_LENGTH, MSG_LEN);
 
-					clients[sock].UDPPort = udpPort;
+					clients[sock].UDPPort = udpPortBuf;
 					clients[sock].filename = filenameBuf;
 
 					clients[sock].print();
@@ -320,6 +316,8 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					clients.erase(clients[sock].TCPSock);
 
 					printf("Connection closing...\n");
+
+					continue;
 				}
 				else {
 					printf("recv failed: %d\n", WSAGetLastError());
@@ -356,6 +354,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					continue;
 				}
 				printf("Bytes sent: %d\n", iSendResult);
+				continue;
 			}
 		}
 
