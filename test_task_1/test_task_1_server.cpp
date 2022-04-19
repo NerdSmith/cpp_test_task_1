@@ -222,6 +222,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	list<SOCKET> UDPSockets;
 	struct Client client;
 
+
 	iResult = listen(ListenSocket, SOMAXCONN);
 	if (iResult == SOCKET_ERROR) {
 		printf("listen failed with error: %d\n", WSAGetLastError());
@@ -231,7 +232,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	}
 
 	for (;;) {
-
+		FD_ZERO(&sockets_fds);
 		FD_SET(ListenSocket, &sockets_fds);
 		for (SOCKET& sock : TCPSockets) {
 			FD_SET(sock, &sockets_fds);
@@ -240,6 +241,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 			FD_SET(sock, &sockets_fds);
 		}
 		/// add sockets to fd_set
+		ZeroMemory(&recvbuf, sizeof(recvbuf));
 		ZeroMemory(&blockNbBuf, sizeof(blockNbBuf));
 		ZeroMemory(&fileDataBuf, sizeof(fileDataBuf));
 
@@ -330,99 +332,34 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		}
 
 		for (const SOCKET& sock : UDPSockets) {
-			// get client & fill map with dataBlocks
+			if (FD_ISSET(sock, &sockets_fds)) {
+				client = clients[UDP_TCP_map[sock]];
+
+				iResult = recvfrom(sock, recvbuf, DEFAULT_BUFLEN, 0, (SOCKADDR*) &SenderAddr, &SenderAddrSize);
+				if (iResult == SOCKET_ERROR) {
+					printf("Recvfrom failed with error %d\n", WSAGetLastError());
+					continue;
+				}
+				memcpy(blockNbBuf, recvbuf, RESERVE_BLOCK_LENGTH);
+				blockNb = atoi(blockNbBuf);
+
+				memcpy(fileDataBuf, recvbuf + RESERVE_BLOCK_LENGTH, DEFAULT_BUFLEN - (RESERVE_BLOCK_LENGTH + 1));
+				printf("Got block %d\n", blockNb);
+
+				vector<char> buffer(fileDataBuf, fileDataBuf + sizeof(fileDataBuf));
+
+				client.dataBlocks.emplace(blockNb, buffer);
+
+				iSendResult = send(client.TCPSock, recvbuf, iResult, 0);
+				if (iSendResult == SOCKET_ERROR) {
+					printf("send failed: %d\n", WSAGetLastError());
+					continue;
+				}
+				printf("Bytes sent: %d\n", iSendResult);
+			}
 		}
 
 	}
-
-
-
-	memset(blockNbBuf, 0, sizeof(blockNbBuf));
-	memset(fileDataBuf, 0, sizeof(fileDataBuf));
-
-	printf("Receiving datagrams...\n");
-
-	for (;;) {
-		FD_SET(TCPClientSocket, &rset);
-		FD_SET(UDPClientSocket, &rset);
-
-		iResult = select(0, &rset, NULL, NULL, NULL);
-
-		if (FD_ISSET(UDPClientSocket, &rset)) {
-			iResult = recvfrom(UDPClientSocket,
-				recvbuf, DEFAULT_BUFLEN, 0, (SOCKADDR*)&SenderAddr, &SenderAddrSize);
-			if (iResult == SOCKET_ERROR) {
-				printf("Recvfrom failed with error %d\n", WSAGetLastError());
-				continue;
-			}
-			memcpy(blockNbBuf, recvbuf, RESERVE_BLOCK_LENGTH);
-			blockNb = atoi(blockNbBuf);
-			memcpy(fileDataBuf, recvbuf + RESERVE_BLOCK_LENGTH, DEFAULT_BUFLEN - (RESERVE_BLOCK_LENGTH + 1));
-			printf("Got block %d\n", blockNb);
-
-			vector<char> buffer(fileDataBuf, fileDataBuf + sizeof(fileDataBuf));
-			dataBlocks.emplace(blockNb, buffer);
-
-			iSendResult = send(TCPClientSocket, recvbuf, iResult, 0);
-			if (iSendResult == SOCKET_ERROR) {
-				printf("send failed: %d\n", WSAGetLastError());
-				continue;
-			}
-			printf("Bytes sent: %d\n", iSendResult);
-			if (iResult == iSendResult) {
-				continue;
-			}
-		}
-
-		if (FD_ISSET(TCPClientSocket, &rset)) {
-			iResult = recv(TCPClientSocket, recvbuf, recvbuflen, 0);
-			if (iResult > 0) {
-				printf("Bytes received: %d\n", iResult);
-			}
-			else if (iResult == 0)
-				printf("Connection closing...\n");
-			else {
-				printf("recv failed: %d\n", WSAGetLastError());
-				closesocket(TCPClientSocket);
-				closesocket(ListenSocket);
-				closesocket(UDPClientSocket);
-				WSACleanup();
-				return 1;
-			}
-			break;
-		}
-	}
-
-	//closesocket(UDPClientSocket);
-
-
-	//printf("blocks nb: %d\n", dataBlocks.size());
-
-	//fileFullPath = dirName + "\\" + filename;
-
-	//ofstream myfile(fileFullPath);
-
-	//if (!myfile) {
-	//	printf("Unable to open file");
-	//	closesocket(TCPClientSocket);
-	//	closesocket(ListenSocket);
-	//	WSACleanup();
-	//	return 1;
-	//}
-
-	//for (i = 0; i < dataBlocks.size(); i++) {
-	//	printf("writing block: %d\n", i + 1);
-	//	memset(&strBuf[0], 0, sizeof(strBuf));
-	//	copy(dataBlocks[i].begin(), dataBlocks[i].end(), strBuf);
-
-	//	myfile.write(&strBuf[0], strlen(strBuf));
-	//}
-
-	//myfile.close();
-	//printf("Transfer completed, file path: %s\n", fileFullPath.c_str());
-	//memset(&recvbuf[0], 0, sizeof(recvbuf));
-	//dataBlocks.clear();
-	
 
 	closesocket(ListenSocket);
 
