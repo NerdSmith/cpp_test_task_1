@@ -9,6 +9,7 @@
 #include <fileapi.h>
 #include <windows.h>
 #include <list>
+#include <format>
 using namespace std;
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -45,11 +46,13 @@ void Client::print() {
 		"UDPSock: %d\n"
 		"filename: %s\n"
 		"UDPPort: %s\n"
+		"Dblocks size: %d\n"
 	, 
 		this->TCPSock, 
 		this->UDPSock, 
-		this->filename, 
-		this->UDPPort
+		this->filename.c_str(),
+		this->UDPPort.c_str(),
+		this->dataBlocks.size()
 	);
 }
 
@@ -125,13 +128,17 @@ int writeDataBlocksToFile(string dir, Client& client) {
 	char strBuf[DEFAULT_BUFLEN];
 
 	printf("blocks nb: %d\n", client.dataBlocks.size());
+	client.print();
+
 
 	string fileFullPath = dir + "\\" + client.filename;
+
+	printf("filepath: %s\n", fileFullPath.c_str());
 
 	ofstream targetFile(fileFullPath);
 
 	if (!targetFile) {
-		printf("Unable to open file");
+		printf("Unable to open file\n");
 		return 1;
 	}
 
@@ -225,6 +232,8 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		return 1;
 	}
 
+	char formatBuff[DEFAULT_BUFLEN];
+
 	for (;;) {
 		FD_ZERO(&sockets_fds);
 		FD_SET(ListenSocket, &sockets_fds);
@@ -258,7 +267,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 			clients.emplace(TCPClientSocket, client);
 		}
 
-		for (const SOCKET& sock : TCPSockets) {
+		for (SOCKET& sock : TCPSockets) {
 			// if not 0 recv -> fill struct, create new sock
 			// otherwise -> close conn, del from sockets & clients
 			if (FD_ISSET(sock, &sockets_fds)) {
@@ -276,12 +285,14 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					printf("Bytes sent: %d\n", iSendResult);
 
 					memcpy(udpPortBuf, recvbuf, RESERVE_BLOCK_LENGTH);
+					ZeroMemory(&formatBuff, sizeof(formatBuff));
+					sprintf_s(formatBuff, sizeof(formatBuff), "%s", udpPortBuf);
+					clients[sock].UDPPort = formatBuff;
+
 					memcpy(filenameBuf, recvbuf + RESERVE_BLOCK_LENGTH, MSG_LEN);
-
-					clients[sock].UDPPort = udpPortBuf;
-					clients[sock].filename = filenameBuf;
-
-					clients[sock].print();
+					ZeroMemory(&formatBuff, sizeof(formatBuff));
+					sprintf_s(formatBuff, sizeof(formatBuff), "%s", filenameBuf);
+					clients[sock].filename = formatBuff;
 
 					ZeroMemory(&recvbuf, sizeof(recvbuf));
 
@@ -301,8 +312,12 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					UDP_TCP_map.emplace(UDPClientSocket, sock);
 
 					clients[sock].UDPSock = UDPClientSocket;
+
+					clients[sock].print();
 				}
 				else if (iResult == 0) {
+					writeDataBlocksToFile(servInfo->dirname, clients[sock]);
+
 					TCPSockets.remove(clients[sock].TCPSock);
 					UDPSockets.remove(clients[sock].UDPSock);
 
@@ -311,13 +326,11 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					closesocket(clients[sock].TCPSock);
 					closesocket(clients[sock].UDPSock);
 
-					writeDataBlocksToFile(servInfo->dirname, clients[sock]);
-
 					clients.erase(clients[sock].TCPSock);
 
 					printf("Connection closing...\n");
 
-					continue;
+					break;
 				}
 				else {
 					printf("recv failed: %d\n", WSAGetLastError());
@@ -329,7 +342,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 			}
 		}
 
-		for (const SOCKET& sock : UDPSockets) {
+		for (SOCKET& sock : UDPSockets) {
 			if (FD_ISSET(sock, &sockets_fds)) {
 				client = clients[UDP_TCP_map[sock]];
 
@@ -346,7 +359,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 				vector<char> buffer(fileDataBuf, fileDataBuf + sizeof(fileDataBuf));
 
-				client.dataBlocks.emplace(blockNb, buffer);
+				clients[UDP_TCP_map[sock]].dataBlocks.emplace(blockNb, buffer);
 
 				iSendResult = send(client.TCPSock, recvbuf, iResult, 0);
 				if (iSendResult == SOCKET_ERROR) {
@@ -357,7 +370,6 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 				continue;
 			}
 		}
-
 	}
 
 	closesocket(ListenSocket);
