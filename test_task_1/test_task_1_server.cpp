@@ -121,6 +121,33 @@ SOCKET createAndBindSocket(char* ipAddr, char* port, addrinfo& hints) {
 	return sock;
 }
 
+int writeDataBlocksToFile(string dir, Client& client) {
+	char strBuf[DEFAULT_BUFLEN];
+
+	printf("blocks nb: %d\n", client.dataBlocks.size());
+
+	string fileFullPath = dir + "\\" + client.filename;
+
+	ofstream targetFile(fileFullPath);
+
+	if (!targetFile) {
+		printf("Unable to open file");
+		return 1;
+	}
+
+	for (int i = 0; i < client.dataBlocks.size(); i++) {
+		printf("writing block: %d\n", i + 1);
+		memset(&strBuf[0], 0, sizeof(strBuf));
+		copy(client.dataBlocks[i].begin(), client.dataBlocks[i].end(), strBuf);
+
+		targetFile.write(&strBuf[0], strlen(strBuf));
+	}
+
+	targetFile.close();
+	printf("Transfer completed, file path: %s\n", fileFullPath.c_str());
+	client.dataBlocks.clear();
+}
+
 
 DWORD WINAPI servFunc(LPVOID lpParam)
 {
@@ -204,10 +231,18 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	}
 
 	for (;;) {
-		
+
 		FD_SET(ListenSocket, &sockets_fds);
+		for (SOCKET& sock : TCPSockets) {
+			FD_SET(sock, &sockets_fds);
+		}
+		for (SOCKET& sock : UDPSockets) {
+			FD_SET(sock, &sockets_fds);
+		}
 		/// add sockets to fd_set
-		
+		ZeroMemory(&blockNbBuf, sizeof(blockNbBuf));
+		ZeroMemory(&fileDataBuf, sizeof(fileDataBuf));
+
 		select(0, &sockets_fds, NULL, NULL, NULL);
 
 		if (FD_ISSET(ListenSocket, &sockets_fds)) {
@@ -253,17 +288,19 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					ZeroMemory(&recvbuf, sizeof(recvbuf));
 
 					UDPClientSocket = createAndBindSocket(
-						servInfo->ipAddr, 
-						const_cast<char*>(clients[sock].UDPPort.c_str()), 
+						servInfo->ipAddr,
+						const_cast<char*>(clients[sock].UDPPort.c_str()),
 						UDPHints
 					);
 
 					if (UDPClientSocket == INVALID_SOCKET) {
+						TCPSockets.remove(sock);
+						clients.erase(sock);
 						continue;
 					}
 
 					UDPSockets.push_back(UDPClientSocket);
-					UDP_TCP_map.emplace(UDPClientSocket, TCPClientSocket);
+					UDP_TCP_map.emplace(UDPClientSocket, sock);
 
 					clients[sock].UDPSock = UDPClientSocket;
 				}
@@ -271,10 +308,14 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					TCPSockets.remove(clients[sock].TCPSock);
 					UDPSockets.remove(clients[sock].UDPSock);
 
-					clients.erase(clients[sock].TCPSock);
+					UDP_TCP_map.erase(clients[sock].TCPSock);
 
 					closesocket(clients[sock].TCPSock);
 					closesocket(clients[sock].UDPSock);
+
+					writeDataBlocksToFile(servInfo->dirname, clients[sock]);
+
+					clients.erase(clients[sock].TCPSock);
 
 					printf("Connection closing...\n");
 				}
@@ -296,33 +337,47 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 
 
+	memset(blockNbBuf, 0, sizeof(blockNbBuf));
+	memset(fileDataBuf, 0, sizeof(fileDataBuf));
 
+	printf("Receiving datagrams...\n");
 
 	for (;;) {
-		TCPClientSocket = accept(ListenSocket, NULL, NULL);
-		if (TCPClientSocket == INVALID_SOCKET) {
-			printf("accept failed: %d\n", WSAGetLastError());
-			closesocket(ListenSocket);
-			WSACleanup();
-			return 1;
+		FD_SET(TCPClientSocket, &rset);
+		FD_SET(UDPClientSocket, &rset);
+
+		iResult = select(0, &rset, NULL, NULL, NULL);
+
+		if (FD_ISSET(UDPClientSocket, &rset)) {
+			iResult = recvfrom(UDPClientSocket,
+				recvbuf, DEFAULT_BUFLEN, 0, (SOCKADDR*)&SenderAddr, &SenderAddrSize);
+			if (iResult == SOCKET_ERROR) {
+				printf("Recvfrom failed with error %d\n", WSAGetLastError());
+				continue;
+			}
+			memcpy(blockNbBuf, recvbuf, RESERVE_BLOCK_LENGTH);
+			blockNb = atoi(blockNbBuf);
+			memcpy(fileDataBuf, recvbuf + RESERVE_BLOCK_LENGTH, DEFAULT_BUFLEN - (RESERVE_BLOCK_LENGTH + 1));
+			printf("Got block %d\n", blockNb);
+
+			vector<char> buffer(fileDataBuf, fileDataBuf + sizeof(fileDataBuf));
+			dataBlocks.emplace(blockNb, buffer);
+
+			iSendResult = send(TCPClientSocket, recvbuf, iResult, 0);
+			if (iSendResult == SOCKET_ERROR) {
+				printf("send failed: %d\n", WSAGetLastError());
+				continue;
+			}
+			printf("Bytes sent: %d\n", iSendResult);
+			if (iResult == iSendResult) {
+				continue;
+			}
 		}
 
-		do {
+		if (FD_ISSET(TCPClientSocket, &rset)) {
 			iResult = recv(TCPClientSocket, recvbuf, recvbuflen, 0);
 			if (iResult > 0) {
 				printf("Bytes received: %d\n", iResult);
-				iSendResult = send(TCPClientSocket, recvbuf, iResult, 0);
-				if (iSendResult == SOCKET_ERROR) {
-					printf("send failed: %d\n", WSAGetLastError());
-					closesocket(TCPClientSocket);
-					closesocket(ListenSocket);
-					WSACleanup();
-					return 1;
-				}
-				printf("Bytes sent: %d\n", iSendResult);
-				if (iResult == iSendResult) {
-					break;
-				}
 			}
 			else if (iResult == 0)
 				printf("Connection closing...\n");
@@ -330,142 +385,44 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 				printf("recv failed: %d\n", WSAGetLastError());
 				closesocket(TCPClientSocket);
 				closesocket(ListenSocket);
+				closesocket(UDPClientSocket);
 				WSACleanup();
 				return 1;
 			}
-		} while (iResult > 0);
-
-		// udp_port & filename
-
-		memcpy(udpPort, recvbuf, RESERVE_BLOCK_LENGTH);
-		memcpy(filenameBuf, recvbuf + RESERVE_BLOCK_LENGTH, MSG_LEN);
-		filename = filenameBuf;
-		printf("UDP port: %s\n", udpPort);
-		printf("Filename: %s\n", filename.c_str());
-		memset(recvbuf, 0, sizeof(recvbuf));
-
-
-		UDPClientSocket = createAndBindSocket(ipAddr, udpPort, UDPHints);
-		if (UDPClientSocket == INVALID_SOCKET) {
-			closesocket(ListenSocket);
-			WSACleanup();
-			return 1;
+			break;
 		}
-
-		//iResult = getaddrinfo(ipAddr, udpPort, &UDPHints, &servAddr);
-		//if (iResult != 0) {
-		//	printf("getaddrinfo failed: %d\n", iResult);
-		//	closesocket(TCPClientSocket);
-		//	closesocket(ListenSocket);
-		//	WSACleanup();
-		//	return 1;
-		//}
-
-		//// UDP
-
-		//UDPClientSocket = socket(servAddr->ai_family, servAddr->ai_socktype, servAddr->ai_protocol);
-		//if (UDPClientSocket == INVALID_SOCKET) {
-		//	printf("Socket failed with error %d\n", WSAGetLastError());
-		//	closesocket(TCPClientSocket);
-		//	closesocket(ListenSocket);
-		//	WSACleanup();
-		//	return 1;
-		//}
-
-
-		//iResult = bind(UDPClientSocket, servAddr->ai_addr, (int)servAddr->ai_addrlen);
-		//if (iResult != 0) {
-		//	printf("Bind failed with error %d\n", WSAGetLastError());
-		//	closesocket(TCPClientSocket);
-		//	closesocket(ListenSocket);
-		//	WSACleanup();
-		//	return 1;
-		//}
-
-		memset(blockNbBuf, 0, sizeof(blockNbBuf));
-		memset(fileDataBuf, 0, sizeof(fileDataBuf));
-
-		printf("Receiving datagrams...\n");
-
-		for (;;) {
-			FD_SET(TCPClientSocket, &rset);
-			FD_SET(UDPClientSocket, &rset);
-
-			iResult = select(0, &rset, NULL, NULL, NULL);
-
-			if (FD_ISSET(UDPClientSocket, &rset)) {
-				iResult = recvfrom(UDPClientSocket,
-					recvbuf, DEFAULT_BUFLEN, 0, (SOCKADDR*)&SenderAddr, &SenderAddrSize);
-				if (iResult == SOCKET_ERROR) {
-					printf("Recvfrom failed with error %d\n", WSAGetLastError());
-					continue;
-				}
-				memcpy(blockNbBuf, recvbuf, RESERVE_BLOCK_LENGTH);
-				blockNb = atoi(blockNbBuf);
-				memcpy(fileDataBuf, recvbuf + RESERVE_BLOCK_LENGTH, DEFAULT_BUFLEN - (RESERVE_BLOCK_LENGTH + 1));
-				printf("Got block %d\n", blockNb);
-
-				vector<char> buffer(fileDataBuf, fileDataBuf + sizeof(fileDataBuf));
-				dataBlocks.emplace(blockNb, buffer);
-
-				iSendResult = send(TCPClientSocket, recvbuf, iResult, 0);
-				if (iSendResult == SOCKET_ERROR) {
-					printf("send failed: %d\n", WSAGetLastError());
-					continue;
-				}
-				printf("Bytes sent: %d\n", iSendResult);
-				if (iResult == iSendResult) {
-					continue;
-				}
-			}
-
-			if (FD_ISSET(TCPClientSocket, &rset)) {
-				iResult = recv(TCPClientSocket, recvbuf, recvbuflen, 0);
-				if (iResult > 0) {
-					printf("Bytes received: %d\n", iResult);
-				}
-				else if (iResult == 0)
-					printf("Connection closing...\n");
-				else {
-					printf("recv failed: %d\n", WSAGetLastError());
-					closesocket(TCPClientSocket);
-					closesocket(ListenSocket);
-					closesocket(UDPClientSocket);
-					WSACleanup();
-					return 1;
-				}
-				break;
-			}
-		}
-
-		closesocket(UDPClientSocket);
-		printf("blocks nb: %d\n", dataBlocks.size());
-
-		fileFullPath = dirName + "\\" + filename;
-
-		ofstream myfile(fileFullPath);
-
-		if (!myfile) {
-			printf("Unable to open file");
-			closesocket(TCPClientSocket);
-			closesocket(ListenSocket);
-			WSACleanup();
-			return 1;
-		}
-
-		for (i = 0; i < dataBlocks.size(); i++) {
-			printf("writing block: %d\n", i + 1);
-			memset(&strBuf[0], 0, sizeof(strBuf));
-			copy(dataBlocks[i].begin(), dataBlocks[i].end(), strBuf);
-
-			myfile.write(&strBuf[0], strlen(strBuf));
-		}
-
-		myfile.close();
-		printf("Transfer completed, file path: %s\n", fileFullPath.c_str());
-		memset(&recvbuf[0], 0, sizeof(recvbuf));
-		dataBlocks.clear();
 	}
+
+	//closesocket(UDPClientSocket);
+
+
+	//printf("blocks nb: %d\n", dataBlocks.size());
+
+	//fileFullPath = dirName + "\\" + filename;
+
+	//ofstream myfile(fileFullPath);
+
+	//if (!myfile) {
+	//	printf("Unable to open file");
+	//	closesocket(TCPClientSocket);
+	//	closesocket(ListenSocket);
+	//	WSACleanup();
+	//	return 1;
+	//}
+
+	//for (i = 0; i < dataBlocks.size(); i++) {
+	//	printf("writing block: %d\n", i + 1);
+	//	memset(&strBuf[0], 0, sizeof(strBuf));
+	//	copy(dataBlocks[i].begin(), dataBlocks[i].end(), strBuf);
+
+	//	myfile.write(&strBuf[0], strlen(strBuf));
+	//}
+
+	//myfile.close();
+	//printf("Transfer completed, file path: %s\n", fileFullPath.c_str());
+	//memset(&recvbuf[0], 0, sizeof(recvbuf));
+	//dataBlocks.clear();
+	
 
 	closesocket(ListenSocket);
 
