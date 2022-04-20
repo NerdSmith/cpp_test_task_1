@@ -153,6 +153,7 @@ int writeDataBlocksToFile(string dir, Client& client) {
 	targetFile.close();
 	printf("Transfer completed, file path: %s\n", fileFullPath.c_str());
 	client.dataBlocks.clear();
+	return 0;
 }
 
 
@@ -171,7 +172,6 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	SOCKET TCPClientSocket = INVALID_SOCKET;
 	SOCKET UDPClientSocket = INVALID_SOCKET;
 
-	struct addrinfo* servAddr = NULL;
 	struct addrinfo TCPHints;
 	struct addrinfo UDPHints;
 
@@ -183,22 +183,22 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 	char udpPortBuf[RESERVE_BLOCK_LENGTH];
 	char filenameBuf[MSG_LEN];
-	string filename;
 
 	struct sockaddr_in SenderAddr;
 	int SenderAddrSize = sizeof(SenderAddr);
 
-	fd_set rset;
-	FD_ZERO(&rset);
+	fd_set sockets_fds;
+	FD_ZERO(&sockets_fds);
+
+	list<SOCKET> TCPSockets;
+	list<SOCKET> UDPSockets;
+	Client client;
+	Client* currClientPtr;
 
 	map<int, vector<char>> dataBlocks;
 	int blockNb;
 	char blockNbBuf[RESERVE_BLOCK_LENGTH];
 	char fileDataBuf[MSG_LEN];
-
-	string fileFullPath;
-	int i;
-	char strBuf[DEFAULT_BUFLEN];
 
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
 	if (iResult != 0) {
@@ -215,15 +215,6 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		return 1;
 	}
 
-	freeaddrinfo(servAddr);
-
-	fd_set sockets_fds;
-	FD_ZERO(&sockets_fds);
-	list<SOCKET> TCPSockets;
-	list<SOCKET> UDPSockets;
-	struct Client client;
-
-
 	iResult = listen(ListenSocket, SOMAXCONN);
 	if (iResult == SOCKET_ERROR) {
 		printf("listen failed with error: %d\n", WSAGetLastError());
@@ -235,6 +226,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 	char formatBuff[DEFAULT_BUFLEN];
 
 	for (;;) {
+		/// add sockets to fd_set
 		FD_ZERO(&sockets_fds);
 		FD_SET(ListenSocket, &sockets_fds);
 		for (SOCKET& sock : TCPSockets) {
@@ -243,7 +235,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		for (SOCKET& sock : UDPSockets) {
 			FD_SET(sock, &sockets_fds);
 		}
-		/// add sockets to fd_set
+
 		ZeroMemory(&recvbuf, sizeof(recvbuf));
 		ZeroMemory(&blockNbBuf, sizeof(blockNbBuf));
 		ZeroMemory(&fileDataBuf, sizeof(fileDataBuf));
@@ -343,8 +335,9 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		}
 
 		for (SOCKET& sock : UDPSockets) {
+			// get client & fill map with dataBlocks 
 			if (FD_ISSET(sock, &sockets_fds)) {
-				client = clients[UDP_TCP_map[sock]];
+				currClientPtr = &(clients[UDP_TCP_map[sock]]);
 
 				iResult = recvfrom(sock, recvbuf, DEFAULT_BUFLEN, 0, (SOCKADDR*) &SenderAddr, &SenderAddrSize);
 				if (iResult == SOCKET_ERROR) {
@@ -359,9 +352,9 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 				vector<char> buffer(fileDataBuf, fileDataBuf + sizeof(fileDataBuf));
 
-				clients[UDP_TCP_map[sock]].dataBlocks.emplace(blockNb, buffer);
+				currClientPtr->dataBlocks.emplace(blockNb, buffer);
 
-				iSendResult = send(client.TCPSock, recvbuf, iResult, 0);
+				iSendResult = send(currClientPtr->TCPSock, recvbuf, iResult, 0);
 				if (iSendResult == SOCKET_ERROR) {
 					printf("send failed: %d\n", WSAGetLastError());
 					continue;
