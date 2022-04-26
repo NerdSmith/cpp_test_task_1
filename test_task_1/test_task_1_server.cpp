@@ -182,9 +182,6 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		return 1;
 	};
 
-	char udpPortBuf[RESERVE_BLOCK_LENGTH];
-	char filenameBuf[MSG_LEN];
-
 	struct sockaddr_in SenderAddr;
 	int SenderAddrSize = sizeof(SenderAddr);
 
@@ -198,7 +195,6 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 
 	map<int, vector<char>> dataBlocks;
 	int blockNb;
-	char blockNbBuf[RESERVE_BLOCK_LENGTH];
 	char fileDataBuf[MSG_LEN];
 
 	iResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -224,8 +220,6 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		return 1;
 	}
 
-	char formatBuff[DEFAULT_BUFLEN];
-
 	for (;;) {
 		/// add sockets to fd_set
 		FD_ZERO(&sockets_fds);
@@ -238,10 +232,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 		}
 
 		ZeroMemory(&recvbuf, sizeof(recvbuf));
-		ZeroMemory(&blockNbBuf, sizeof(blockNbBuf));
 		ZeroMemory(&fileDataBuf, sizeof(fileDataBuf));
-		ZeroMemory(&udpPortBuf, sizeof(udpPortBuf));
-		ZeroMemory(&filenameBuf, sizeof(filenameBuf));
 
 		select(0, &sockets_fds, NULL, NULL, NULL);
 
