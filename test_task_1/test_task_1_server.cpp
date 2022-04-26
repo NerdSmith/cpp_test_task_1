@@ -339,8 +339,6 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					printf("Recvfrom failed with error %d\n", WSAGetLastError());
 					continue;
 				}
-				//memcpy(blockNbBuf, recvbuf, RESERVE_BLOCK_LENGTH);
-				//blockNb = atoi(blockNbBuf);
 
 				blockNb = *((int16_t*)(recvbuf));
 

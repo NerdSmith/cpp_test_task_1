@@ -50,7 +50,6 @@ int main(int argc, char* argv[])
 
 	int blockNb = 0;
 	int recvBlockNb;
-	char recvBlockNbBuf[RESERVE_BLOCK_LENGTH];
 
 	int selectRes;
 
