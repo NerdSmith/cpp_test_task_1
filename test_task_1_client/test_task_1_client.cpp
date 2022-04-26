@@ -45,6 +45,8 @@ int main(int argc, char* argv[])
 	char payload[DEFAULT_BUFLEN];
 
 	char fileData[DEFAULT_BUFLEN];
+	ZeroMemory(&fileData, sizeof(fileData));
+	int16_t* blockNbFData = (int16_t*)(fileData);
 	std::set<int> pNumbers;
 
 	int blockNb = 0;
@@ -108,7 +110,11 @@ int main(int argc, char* argv[])
 	// create port_filename payload
 
 	memset(&payload[0], 0, sizeof(payload));
-	memcpy(payload, udpPort, strlen(udpPort));
+	// memcpy(payload, udpPort, strlen(udpPort));
+	blockNbFData = (int16_t*)(payload);
+	*blockNbFData = (int16_t)(atoi(udpPort));
+	//printf("%d\n", *blockNbFData);
+
 	memcpy(payload + RESERVE_BLOCK_LENGTH, filename, strlen(filename));
 
 	//send port & filename
@@ -157,7 +163,7 @@ int main(int argc, char* argv[])
 
 	// send file data
 
-	memset(&blockNbBuf[0], 0, sizeof(blockNbBuf));
+	//memset(&blockNbBuf[0], 0, sizeof(blockNbBuf));
 
 	std::ifstream myfile (filename);
 	if (!myfile) {
@@ -170,11 +176,13 @@ int main(int argc, char* argv[])
 
 	memset(&fileData[0], 0, sizeof(fileData));
 
-	for (;;) {
-		_itoa_s(blockNb, blockNbBuf, 10);
-		printf("block nb %s\n", blockNbBuf);
+	blockNbFData = (int16_t*)(fileData);
 
-		memcpy(fileData, blockNbBuf, sizeof(blockNbBuf) - 1);
+	for (;;) {
+
+		*blockNbFData = static_cast<int16_t>(blockNb);
+		
+		printf("block nb %d\n", blockNb);
 
 		myfile.read(&fileData[RESERVE_BLOCK_LENGTH], MSG_LEN - 1);
 
@@ -210,8 +218,8 @@ int main(int argc, char* argv[])
 
 				if (receiveResult > 0) {
 					memcpy(recvBlockNbBuf, recvbuf, RESERVE_BLOCK_LENGTH);
-					recvBlockNb = atoi(recvBlockNbBuf);
 
+					recvBlockNb = *((int16_t*)(recvbuf));
 					printf("curr pnb %d | got %d\n", blockNb, recvBlockNb);
 
 					if (pNumbers.find(recvBlockNb) != pNumbers.end()) {
@@ -245,7 +253,7 @@ int main(int argc, char* argv[])
 		else {
 			blockNb++;
 			memset(&fileData[0], 0, sizeof(fileData));
-			memset(&blockNbBuf[0], 0, sizeof(blockNbBuf));
+			// memset(&blockNbBuf[0], 0, sizeof(blockNbBuf));
 		}
 	}
 

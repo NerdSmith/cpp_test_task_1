@@ -143,7 +143,8 @@ int writeDataBlocksToFile(string dir, Client& client) {
 	}
 
 	for (int i = 0; i < client.dataBlocks.size(); i++) {
-		printf("writing block: %d\n", i + 1);
+		printf("\rwriting block: %d", i + 1);
+		fflush(stdout);
 		memset(&strBuf[0], 0, sizeof(strBuf));
 		copy(client.dataBlocks[i].begin(), client.dataBlocks[i].end(), strBuf);
 
@@ -151,7 +152,7 @@ int writeDataBlocksToFile(string dir, Client& client) {
 	}
 
 	targetFile.close();
-	printf("Transfer completed, file path: %s\n", fileFullPath.c_str());
+	printf("\nTransfer completed, file path: %s\n", fileFullPath.c_str());
 	client.dataBlocks.clear();
 	return 0;
 }
@@ -265,6 +266,7 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 			if (FD_ISSET(sock, &sockets_fds)) {
 				iResult = recv(sock, recvbuf, recvbuflen, 0);
 				if (iResult > 0) {
+					cout << std::to_string(*((int16_t*)(recvbuf))) << endl;
 					printf("Bytes received: %d\n", iResult);
 					iSendResult = send(sock, recvbuf, iResult, 0);
 					if (iSendResult == SOCKET_ERROR) {
@@ -276,10 +278,14 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					}
 					printf("Bytes sent: %d\n", iSendResult);
 
-					memcpy(udpPortBuf, recvbuf, RESERVE_BLOCK_LENGTH);
-					ZeroMemory(&formatBuff, sizeof(formatBuff));
-					sprintf_s(formatBuff, sizeof(formatBuff), "%s", udpPortBuf);
-					clients[sock].UDPPort = formatBuff;
+					cout << std::to_string(*((int16_t*)(recvbuf))) << endl;
+
+					clients[sock].UDPPort = std::to_string(*((int16_t*)(recvbuf)));
+
+					//memcpy(udpPortBuf, recvbuf, RESERVE_BLOCK_LENGTH);
+					//ZeroMemory(&formatBuff, sizeof(formatBuff));
+					//sprintf_s(formatBuff, sizeof(formatBuff), "%d", udpPortBuf);
+					//clients[sock].UDPPort = formatBuff;
 
 					memcpy(filenameBuf, recvbuf + RESERVE_BLOCK_LENGTH, MSG_LEN);
 					ZeroMemory(&formatBuff, sizeof(formatBuff));
@@ -344,8 +350,10 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					printf("Recvfrom failed with error %d\n", WSAGetLastError());
 					continue;
 				}
-				memcpy(blockNbBuf, recvbuf, RESERVE_BLOCK_LENGTH);
-				blockNb = atoi(blockNbBuf);
+				//memcpy(blockNbBuf, recvbuf, RESERVE_BLOCK_LENGTH);
+				//blockNb = atoi(blockNbBuf);
+
+				blockNb = *((int16_t*)(recvbuf));
 
 				memcpy(fileDataBuf, recvbuf + RESERVE_BLOCK_LENGTH, DEFAULT_BUFLEN - (RESERVE_BLOCK_LENGTH + 1));
 				printf("Got block %d\n", blockNb);
