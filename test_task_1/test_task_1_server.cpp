@@ -15,7 +15,7 @@ using namespace std;
 #pragma comment(lib, "Ws2_32.lib")
 
 #define DEFAULT_BUFLEN 512
-#define RESERVE_BLOCK_LENGTH 5
+#define RESERVE_BLOCK_LENGTH sizeof(int16_t)
 #define MSG_LEN DEFAULT_BUFLEN - RESERVE_BLOCK_LENGTH
 
 static DWORD threadId;
@@ -266,7 +266,6 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 			if (FD_ISSET(sock, &sockets_fds)) {
 				iResult = recv(sock, recvbuf, recvbuflen, 0);
 				if (iResult > 0) {
-					cout << std::to_string(*((int16_t*)(recvbuf))) << endl;
 					printf("Bytes received: %d\n", iResult);
 					iSendResult = send(sock, recvbuf, iResult, 0);
 					if (iSendResult == SOCKET_ERROR) {
@@ -278,19 +277,9 @@ DWORD WINAPI servFunc(LPVOID lpParam)
 					}
 					printf("Bytes sent: %d\n", iSendResult);
 
-					cout << std::to_string(*((int16_t*)(recvbuf))) << endl;
-
 					clients[sock].UDPPort = std::to_string(*((int16_t*)(recvbuf)));
 
-					//memcpy(udpPortBuf, recvbuf, RESERVE_BLOCK_LENGTH);
-					//ZeroMemory(&formatBuff, sizeof(formatBuff));
-					//sprintf_s(formatBuff, sizeof(formatBuff), "%d", udpPortBuf);
-					//clients[sock].UDPPort = formatBuff;
-
-					memcpy(filenameBuf, recvbuf + RESERVE_BLOCK_LENGTH, MSG_LEN);
-					ZeroMemory(&formatBuff, sizeof(formatBuff));
-					sprintf_s(formatBuff, sizeof(formatBuff), "%s", filenameBuf);
-					clients[sock].filename = formatBuff;
+					clients[sock].filename = recvbuf + RESERVE_BLOCK_LENGTH;
 
 					ZeroMemory(&recvbuf, sizeof(recvbuf));
 

@@ -9,7 +9,7 @@
 #pragma comment(lib, "Ws2_32.lib")
 
 #define DEFAULT_BUFLEN 512
-#define RESERVE_BLOCK_LENGTH 5
+#define RESERVE_BLOCK_LENGTH sizeof(int16_t)
 #define MSG_LEN DEFAULT_BUFLEN - RESERVE_BLOCK_LENGTH
 
 int main(int argc, char* argv[]) 
@@ -42,15 +42,13 @@ int main(int argc, char* argv[])
 					TCPHints,
 					UDPHints;
 
-	char payload[DEFAULT_BUFLEN];
+	char sendbuf[DEFAULT_BUFLEN];
+	ZeroMemory(&sendbuf, sizeof(sendbuf));
 
-	char fileData[DEFAULT_BUFLEN];
-	ZeroMemory(&fileData, sizeof(fileData));
-	int16_t* blockNbFData = (int16_t*)(fileData);
+	int16_t* reserve_block_i16 = NULL;
 	std::set<int> pNumbers;
 
 	int blockNb = 0;
-	char blockNbBuf[RESERVE_BLOCK_LENGTH + 1];
 	int recvBlockNb;
 	char recvBlockNbBuf[RESERVE_BLOCK_LENGTH];
 
@@ -65,7 +63,6 @@ int main(int argc, char* argv[])
 		printf("WSAStartup failed: %d\n", iResult);
 		return 1;
 	}
-
 
 	ZeroMemory(&TCPHints, sizeof(TCPHints));
 	TCPHints.ai_family = AF_INET;
@@ -107,19 +104,17 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	// create port_filename payload
+	// create port_filename sendbuf
+	ZeroMemory(&sendbuf, sizeof(sendbuf));
 
-	memset(&payload[0], 0, sizeof(payload));
-	// memcpy(payload, udpPort, strlen(udpPort));
-	blockNbFData = (int16_t*)(payload);
-	*blockNbFData = (int16_t)(atoi(udpPort));
-	//printf("%d\n", *blockNbFData);
+	reserve_block_i16 = (int16_t*)(sendbuf);
+	*reserve_block_i16 = (int16_t)(atoi(udpPort));
 
-	memcpy(payload + RESERVE_BLOCK_LENGTH, filename, strlen(filename));
+	memcpy(sendbuf + RESERVE_BLOCK_LENGTH, filename, strlen(filename));
 
 	//send port & filename
 	do {
-		sendResult = send(ConnectSocket, payload, (int)sizeof(payload), 0);
+		sendResult = send(ConnectSocket, sendbuf, (int)sizeof(sendbuf), 0);
 		if (sendResult == SOCKET_ERROR) {
 			printf("send failed: %d\n", WSAGetLastError());
 			closesocket(ConnectSocket);
@@ -145,7 +140,6 @@ int main(int argc, char* argv[])
 	UDPHints.ai_socktype = SOCK_DGRAM;
 	UDPHints.ai_protocol = IPPROTO_UDP;
 
-
 	iResult = getaddrinfo(ipAddr, udpPort, &UDPHints, &result);
 	if (iResult != 0) {
 		printf("getaddrinfo failed: %d\n", iResult);
@@ -163,8 +157,6 @@ int main(int argc, char* argv[])
 
 	// send file data
 
-	//memset(&blockNbBuf[0], 0, sizeof(blockNbBuf));
-
 	std::ifstream myfile (filename);
 	if (!myfile) {
 		printf("Unable to open file");
@@ -174,23 +166,23 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	memset(&fileData[0], 0, sizeof(fileData));
+	ZeroMemory(&sendbuf, sizeof(sendbuf));
 
-	blockNbFData = (int16_t*)(fileData);
+	reserve_block_i16 = (int16_t*)(sendbuf);
 
 	for (;;) {
 
-		*blockNbFData = static_cast<int16_t>(blockNb);
+		*reserve_block_i16 = static_cast<int16_t>(blockNb);
 		
 		printf("block nb %d\n", blockNb);
 
-		myfile.read(&fileData[RESERVE_BLOCK_LENGTH], MSG_LEN - 1);
+		myfile.read(&sendbuf[RESERVE_BLOCK_LENGTH], MSG_LEN - 1);
 
 		for (;;) {
 			FD_ZERO(&rset);
 			FD_SET(ConnectSocket, &rset);
 
-			iResult = sendto(UDPSocket, fileData, sizeof(fileData),
+			iResult = sendto(UDPSocket, sendbuf, sizeof(sendbuf),
 				0, result->ai_addr, result->ai_addrlen);
 			if (iResult == SOCKET_ERROR) {
 				printf("send failed: %d\n", WSAGetLastError());
@@ -217,7 +209,6 @@ int main(int argc, char* argv[])
 				receiveResult = recv(ConnectSocket, recvbuf, recvbuflen, 0);
 
 				if (receiveResult > 0) {
-					memcpy(recvBlockNbBuf, recvbuf, RESERVE_BLOCK_LENGTH);
 
 					recvBlockNb = *((int16_t*)(recvbuf));
 					printf("curr pnb %d | got %d\n", blockNb, recvBlockNb);
@@ -252,8 +243,7 @@ int main(int argc, char* argv[])
 		}
 		else {
 			blockNb++;
-			memset(&fileData[0], 0, sizeof(fileData));
-			// memset(&blockNbBuf[0], 0, sizeof(blockNbBuf));
+			ZeroMemory(&sendbuf, sizeof(sendbuf));
 		}
 	}
 
